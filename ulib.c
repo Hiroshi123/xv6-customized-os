@@ -50,6 +50,14 @@ strchr(const char *s, char c)
 }
 
 char*
+strcat(char * restrict s1, char * restrict s2)
+{
+  strcpy(s1 + strlen(s1), s2);
+  return s1;
+}
+
+
+char*
 gets(char *buf, int max)
 {
   int i, cc;
