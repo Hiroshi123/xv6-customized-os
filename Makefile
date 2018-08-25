@@ -1,35 +1,9 @@
-OBJS = \
-	bio.o\
-	console.o\
-	exec.o\
-	file.o\
-	fs.o\
-	ide.o\
-	ioapic.o\
-	kalloc.o\
-	kbd.o\
-	lapic.o\
-	log.o\
-	main.o\
-	mp.o\
-	picirq.o\
-	pipe.o\
-	proc.o\
-	sleeplock.o\
-	spinlock.o\
-	string.o\
-	swtch.o\
-	syscall.o\
-	sysfile.o\
-	sysproc.o\
-	trapasm.o\
-	trap.o\
-	uart.o\
-	vectors.o\
-	vm.o\
+
 
 # Cross-compiling (e.g., on Mac OS X)
 # TOOLPREFIX = i386-jos-elf
+
+TOOLPREFIX = i386-elf-
 
 # Using native tools (e.g., on X86 Linux)
 #TOOLPREFIX = 
@@ -51,7 +25,7 @@ TOOLPREFIX := $(shell if i386-jos-elf-objdump -i 2>&1 | grep '^elf32-i386$$' >/d
 endif
 
 # If the makefile can't find QEMU, specify its path here
-# QEMU = qemu-system-i386
+QEMU = qemu-system-i386
 
 # Try to infer the correct QEMU
 ifndef QEMU
@@ -76,12 +50,53 @@ AS = $(TOOLPREFIX)gas
 LD = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
-CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -O2 -Wall -MD -ggdb -m32 -Werror -fno-omit-frame-pointer
+CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -O2 -Wall -MD -m32 -fno-omit-frame-pointer #  -ggdb  -Werror 
 #CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -fvar-tracking -fvar-tracking-assignments -O0 -g -Wall -MD -gdwarf-2 -m32 -Werror -fno-omit-frame-pointer
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
-ASFLAGS = -m32 -gdwarf-2 -Wa,-divide
+INCLUDES = -I./usr/include -I./sys -I$(KERNELDIR)/$(HEADERDIR) 
+CFLAGS += $(INCLUDES)
+ASFLAGS = -m32 -gdwarf-2 -Wa,-divide # -I./ -I./lib
+ASFLAGS += $(INCLUDES)
 # FreeBSD ld wants ``elf_i386_fbsd''
 LDFLAGS += -m $(shell $(LD) -V | grep elf_i386 2>/dev/null | head -n 1)
+OBJDIR = obj
+LIBDIR = ./usr/lib
+KERNELDIR = ./usr/src/kernel
+HEADERDIR = include
+CMDDIR = bin
+DOCDIR = doc
+
+OBJS_ := \
+	arch/i386/lapic.o\
+	arch/i386/ioapic.o\
+	arch/i386/swtch.o\
+	arch/i386/picirq.o\
+	arch/i386/trapasm.o\
+	arch/i386/vectors.o\
+	block/bio.o\
+	drivers/ide.o\
+	drivers/console.o\
+	drivers/kbd.o\
+	fs/exec.o\
+	fs/file.o\
+	fs/fs.o\
+	fs/pipe.o\
+	fs/sysfile.o\
+	init/main.o\
+	kernel/mp.o\
+	kernel/syscall.o\
+	kernel/trap.o\
+	kernel/uart.o\
+	lib/log.o\
+	lib/string.o\
+	locking/sleeplock.o\
+	locking/spinlock.o\
+	mm/kalloc.o\
+	mm/proc.o\
+	mm/sysproc.o\
+	mm/vm.o\
+
+OBJS := $(addprefix $(KERNELDIR)/,$(OBJS_))
 
 xv6.img: bootblock kernel fs.img
 	dd if=/dev/zero of=xv6.img count=10000
@@ -93,28 +108,12 @@ xv6memfs.img: bootblock kernelmemfs
 	dd if=bootblock of=xv6memfs.img conv=notrunc
 	dd if=kernelmemfs of=xv6memfs.img seek=1 conv=notrunc
 
-bootblock: bootasm.S bootmain.c
-	$(CC) $(CFLAGS) -fno-pic -O -nostdinc -I. -c bootmain.c
-	$(CC) $(CFLAGS) -fno-pic -nostdinc -I. -c bootasm.S
-	$(LD) $(LDFLAGS) -N -e start -Ttext 0x7C00 -o bootblock.o bootasm.o bootmain.o
-	$(OBJDUMP) -S bootblock.o > bootblock.asm
-	$(OBJCOPY) -S -O binary -j .text bootblock.o bootblock
-	./sign.pl bootblock
+include ./boot/Makefile
 
-entryother: entryother.S
-	$(CC) $(CFLAGS) -fno-pic -nostdinc -I. -c entryother.S
-	$(LD) $(LDFLAGS) -N -e start -Ttext 0x7000 -o bootblockother.o entryother.o
-	$(OBJCOPY) -S -O binary -j .text bootblockother.o entryother
-	$(OBJDUMP) -S bootblockother.o > entryother.asm
-
-initcode: initcode.S
-	$(CC) $(CFLAGS) -nostdinc -I. -c initcode.S
-	$(LD) $(LDFLAGS) -N -e start -Ttext 0 -o initcode.out initcode.o
-	$(OBJCOPY) -S -O binary initcode.out initcode
-	$(OBJDUMP) -S initcode.o > initcode.asm
-
-kernel: $(OBJS) entry.o entryother initcode kernel.ld
-	$(LD) $(LDFLAGS) -T kernel.ld -o kernel entry.o $(OBJS) -b binary initcode entryother
+kernel: $(OBJS) $(KERNELDIR)/arch/i386/entry.o entryother initcode $(KERNELDIR)/kernel.ld
+	$(LD) $(LDFLAGS) -T $(KERNELDIR)/kernel.ld -o kernel $(KERNELDIR)/arch/i386/entry.o $(OBJS) \
+	-b binary initcode entryother
+        # -b binary $(KERNELDIR)/arch/i386/initcode $(KERNELDIR)/arch/i386/entryother
 	$(OBJDUMP) -S kernel > kernel.asm
 	$(OBJDUMP) -t kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > kernel.sym
 
@@ -133,24 +132,32 @@ kernelmemfs: $(MEMFSOBJS) entry.o entryother initcode kernel.ld fs.img
 tags: $(OBJS) entryother.S _init
 	etags *.S *.c
 
-vectors.S: vectors.pl
-	perl vectors.pl > vectors.S
+vectors.S: $(KERNELDIR)/vectors.pl
+	perl $(KERNELDIR)/vectors.pl > $(KERNELDIR)/vectors.S
 
-ULIB = ulib.o usys.o printf.o umalloc.o
+ulib_asm: ulib.o
+	$(OBJDUMP) -S ulib.o > debug/ulib.asm
 
-_%: %.o $(ULIB)
+ULIB = lib/ulib.o lib/usys.o lib/printf.o lib/umalloc.o
+
+$(CMDDIR)/_%: $(LIBDIR)/%.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
-	$(OBJDUMP) -S $@ > $*.asm
-	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $*.sym
+	$(OBJDUMP) -S $@ > debug/$*.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > debug/$*.sym
 
-_forktest: forktest.o $(ULIB)
+$(CMDDIR)/_forktest: $(LIBDIR)/forktest.o $(ULIB)
 	# forktest has less library code linked in - needs to be small
 	# in order to be able to max out the proc table.
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _forktest forktest.o ulib.o usys.o
-	$(OBJDUMP) -S _forktest > forktest.asm
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $(CMDDIR)/_forktest $(LIBDIR)/forktest.o lib/ulib.o lib/usys.o
+	$(OBJDUMP) -S $(CMDDIR)/_forktest > debug/forktest.asm
 
-mkfs: mkfs.c fs.h
-	gcc -Werror -Wall -o mkfs mkfs.c
+$(CMDDIR)/_cmd01: lib/cmd01.o lib/usys.o lib/asm01.o lib/printf.o
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $(CMDDIR)/_cmd01 lib/cmd01.o lib/usys.o lib/asm01.o lib/printf.o
+	$(OBJDUMP) -S $(CMDDIR)/_cmd01 > debug/cmd01.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > debug/$*.sym
+
+mkfs: mkfs.c
+	gcc -I./usr/src/kernel/include -Werror -Wall -o mkfs mkfs.c
 
 # Prevent deletion of intermediate files, e.g. cat.o, after first build, so
 # that disk image changes after first build are persistent until clean.  More
@@ -158,7 +165,7 @@ mkfs: mkfs.c fs.h
 # http://www.gnu.org/software/make/manual/html_node/Chained-Rules.html
 .PRECIOUS: %.o
 
-UPROGS=\
+UPROGS_=\
 	_cat\
 	_echo\
 	_forktest\
@@ -174,6 +181,9 @@ UPROGS=\
 	_usertests\
 	_wc\
 	_zombie\
+	_cmd01\
+
+UPROGS = $(addprefix $(CMDDIR)/,$(UPROGS_))
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
@@ -182,17 +192,19 @@ fs.img: mkfs README $(UPROGS)
 
 clean: 
 	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
-	*.o *.d *.asm *.sym vectors.S bootblock entryother \
+	*.o *.d debug/*.asm debug/*.sym vectors.S bootblock entryother \
 	initcode initcode.out kernel xv6.img fs.img kernelmemfs mkfs \
 	.gdbinit \
-	$(UPROGS)
+	lib/*.o lib/*.d $(KERNELDIR)/*.o $(KERNELDIR)/*.d obj/*.o \
+	$(LIBDIR)/*.o $(LIBDIR)/*.d $(LIBDIR)/*.sym $(LIBDIR)/*.asm \
+        $(UPROGS) $(KERNELDIR)/arch/i386/*.o $(KERNELDIR)/arch/i386/*.out
 
 # make a printout
-FILES = $(shell grep -v '^\#' runoff.list)
-PRINT = runoff.list runoff.spec README toc.hdr toc.ftr $(FILES)
+FILES = $(shell grep -v '^\#' $(DOCDIR)/runoff.list)
+PRINT = $(DOCDIR)/runoff.list $(DOCDIR)/runoff.spec README $(DOCDIR)/toc.hdr $(DOCDIR)/toc.ftr $(FILES)
 
 xv6.pdf: $(PRINT)
-	./runoff
+	./$(DOCDIR)/runoff
 	ls -l xv6.pdf
 
 print: xv6.pdf

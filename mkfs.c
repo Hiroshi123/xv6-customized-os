@@ -6,14 +6,44 @@
 #include <assert.h>
 
 #define stat xv6_stat  // avoid clash with host struct stat
-#include "types.h"
+typedef unsigned int   uint;
+typedef unsigned short ushort;
+typedef unsigned char  uchar;
+typedef uint pde_t;
+
 #include "fs.h"
-#include "stat.h"
-#include "param.h"
+
+#define NPROC        64  // maximum number of processes
+#define KSTACKSIZE 4096  // size of per-process kernel stack
+#define NCPU          8  // maximum number of CPUs
+#define NOFILE       16  // open files per process
+#define NFILE       100  // open files per system
+#define NINODE       50  // maximum number of active i-nodes
+#define NDEV         10  // maximum major device number
+#define ROOTDEV       1  // device number of file system root disk
+#define MAXARG       32  // max exec arguments
+#define MAXOPBLOCKS  10  // max # of blocks any FS op writes
+#define LOGSIZE      (MAXOPBLOCKS*3)  // max data blocks in on-disk log
+#define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
+#define FSSIZE       1000  // size of file system in blocks
+
 
 #ifndef static_assert
 #define static_assert(a, b) do { switch (0) case 0: case (a): ; } while (0)
 #endif
+
+#define T_DIR  1   // Directory
+#define T_FILE 2   // File
+#define T_DEV  3   // Device
+
+struct stat {
+  short type;  // Type of file
+  int dev;     // File system's disk device
+  uint ino;    // Inode number
+  short nlink; // Number of links to file
+  uint size;   // Size of file in bytes
+};
+
 
 #define NINODES 200
 
@@ -73,7 +103,6 @@ main(int argc, char *argv[])
   char buf[BSIZE];
   struct dinode din;
 
-
   static_assert(sizeof(int) == 4, "Integers must be 4 bytes!");
 
   if(argc < 2){
@@ -128,8 +157,9 @@ main(int argc, char *argv[])
   iappend(rootino, &de, sizeof(de));
 
   for(i = 2; i < argc; i++){
-    assert(index(argv[i], '/') == 0);
+    // assert(index(argv[i], '/usr/bin/') == 0);
 
+    printf("file : %s\n", argv[i]);
     if((fd = open(argv[i], 0)) < 0){
       perror(argv[i]);
       exit(1);
@@ -139,9 +169,11 @@ main(int argc, char *argv[])
     // The binaries are named _rm, _cat, etc. to keep the
     // build operating system from trying to execute them
     // in place of system binaries like rm and cat.
-    if(argv[i][0] == '_')
-      ++argv[i];
 
+    if(argv[i][4] == '_'){      
+      argv[i]+=5;
+    }
+    
     inum = ialloc(T_FILE);
 
     bzero(&de, sizeof(de));
@@ -149,6 +181,8 @@ main(int argc, char *argv[])
     strncpy(de.name, argv[i], DIRSIZ);
     iappend(rootino, &de, sizeof(de));
 
+    // read 512 byte from a given file.
+    // pointer of buff is going to be stepped up.
     while((cc = read(fd, buf, sizeof(buf))) > 0)
       iappend(inum, buf, cc);
 
@@ -186,7 +220,6 @@ winode(uint inum, struct dinode *ip)
   char buf[BSIZE];
   uint bn;
   struct dinode *dip;
-
   bn = IBLOCK(inum, sb);
   rsect(bn, buf);
   dip = ((struct dinode*)buf) + (inum % IPB);
